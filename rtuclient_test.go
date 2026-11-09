@@ -6,6 +6,7 @@ package modbus
 
 import (
 	"bytes"
+	"io"
 	"testing"
 )
 
@@ -94,5 +95,46 @@ func BenchmarkRTUDecoder(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// shortReadPort returns at most max bytes per Read, so a response arrives in
+// several reads, as it does on a slow serial line.
+type shortReadPort struct {
+	resp []byte
+	max  int
+}
+
+func (p *shortReadPort) Write(b []byte) (int, error) { return len(b), nil }
+func (p *shortReadPort) Close() error                { return nil }
+func (p *shortReadPort) Read(b []byte) (int, error) {
+	if len(p.resp) == 0 {
+		return 0, io.EOF
+	}
+	n := p.max
+	if n > len(b) {
+		n = len(b)
+	}
+	if n > len(p.resp) {
+		n = len(p.resp)
+	}
+	copy(b, p.resp[:n])
+	p.resp = p.resp[n:]
+	return n, nil
+}
+
+func TestRTUExceptionResponseInTwoReads(t *testing.T) {
+	// Exception response to FC3 from slave 1: illegal data address.
+	resp := []byte{0x01, 0x83, 0x02, 0xC0, 0xF1}
+	mb := rtuSerialTransporter{}
+	mb.port = &shortReadPort{resp: resp, max: rtuMinSize}
+	mb.BaudRate = 19200
+	request := []byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A}
+	got, err := mb.Send(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, resp) {
+		t.Fatalf("response: expected % x, actual % x", resp, got)
 	}
 }

@@ -125,7 +125,10 @@ func (mb *rtuSerialTransporter) Send(aduRequest []byte) (aduResponse []byte, err
 		return
 	}
 	function := aduRequest[1]
-	functionFail := aduRequest[1] & 0x80
+	// An exception response carries the request function with the high bit
+	// set. aduRequest[1] & 0x80 is always 0 for a request, which made the
+	// exception branch below unreachable (goburrow/modbus#81).
+	functionFail := aduRequest[1] | 0x80
 	bytesToRead := calculateResponseLength(aduRequest)
 	time.Sleep(mb.calculateDelay(len(aduRequest) + bytesToRead))
 
